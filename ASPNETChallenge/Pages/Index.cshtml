@@ -1,0 +1,200 @@
+﻿@page
+@model IndexModel
+@{
+    Layout = null;
+}
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Müşteri Bakiye Seyri</title>
+
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+
+    <!-- Chart.js CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <style>
+        body {
+            margin: 0;
+            font-family: 'Inter', sans-serif;
+            background: #f0f2f5;
+            color: #333;
+        }
+
+        .container {
+            max-width: 1100px;
+            margin: 50px auto;
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 30px;
+        }
+
+        h1 {
+            text-align: center;
+            color: #002244;
+            font-weight: 700;
+            animation: fadeIn 0.8s ease forwards;
+        }
+
+        .card {
+            background: #fff;
+            padding: 25px;
+            border-radius: 12px;
+            box-shadow: 0 10px 20px rgba(0,0,0,0.08);
+            transition: transform 0.3s, box-shadow 0.3s;
+            animation: fadeIn 0.8s ease forwards;
+        }
+
+        .card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 15px 25px rgba(0,0,0,0.12);
+        }
+
+        select {
+            width: 100%;
+            padding: 12px 15px;
+            font-size: 16px;
+            border-radius: 8px;
+            border: 1px solid #ccc;
+            margin-bottom: 15px;
+            transition: 0.3s;
+            background-color: #fff;
+            color: #333; 
+        }
+
+        select:hover, select:focus {
+            border-color: #007bff;
+            box-shadow: 0 0 8px rgba(0,123,255,0.2);
+            outline: none;
+        }
+
+        #maxDebtInfo {
+            padding: 10px 15px;
+            border-radius: 8px;
+            background: #ffe5e5;
+            color: #d32f2f;
+            font-weight: 600;
+            margin-bottom: 20px;
+            transition: background 0.3s, color 0.3s;
+        }
+
+        #maxDebtInfo.highlight {
+            background: #ffdce0;
+            color: #b71c1c;
+        }
+
+        canvas {
+            width: 100% !important;
+            max-height: 450px;
+        }
+
+        @@keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Müşteri Bakiye Seyri</h1>
+
+        <div class="card">
+            <select id="musteriSelect">
+                <option value="">📌 Bir müşteri seçin</option>
+            </select>
+            <div id="maxDebtInfo">Henüz müşteri seçilmedi.</div>
+        </div>
+
+        <div class="card">
+            <canvas id="bakiyeChart"></canvas>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener("DOMContentLoaded", () => {
+            const customerSelect = document.getElementById("musteriSelect");
+            const maxDebtInfo = document.getElementById("maxDebtInfo");
+            const ctx = document.getElementById('bakiyeChart').getContext('2d');
+            let myChart;
+
+            // Müşteri verilerini çek
+            fetch("/api/musteri/all")
+                .then(res => res.json())
+                .then(data => {
+                    data.forEach(m => {
+                        const option = document.createElement("option");
+                        option.value = m.id;     
+                        option.textContent = m.unvan;
+                        customerSelect.appendChild(option);
+                    });
+                })
+                .catch(err => console.error("Müşteri yükleme hatası:", err));
+
+            // Seçilen müşteri değiştiğinde chart güncelle
+            customerSelect.addEventListener("change", () => {
+                const customerId = parseInt(customerSelect.value);
+                if (!customerId) {
+                    maxDebtInfo.innerHTML = "📌 Henüz müşteri seçilmedi.";
+                    maxDebtInfo.classList.remove("highlight");
+                    if (myChart) myChart.destroy();
+                    return;
+                }
+
+                fetch(`/api/musteri/${customerId}/bakiye`)
+                    .then(res => res.json())
+                    .then(data => {
+                        if (myChart) myChart.destroy();
+
+                        const labels = data.history.map(h => h.date);
+                        const amounts = data.history.map(h => h.amount);
+                        const maxDebt = data.maxDebt;
+                        const maxIndex = amounts.indexOf(maxDebt);
+                        const pointColors = amounts.map((a, i) => i === maxIndex ? '#ff1744' : '#007bff');
+
+                        myChart = new Chart(ctx, {
+                            type: 'line',
+                            data: {
+                                labels: labels,
+                                datasets: [{
+                                    label: 'Borç Seyri',
+                                    data: amounts,
+                                    borderColor: '#007bff',
+                                    backgroundColor: 'rgba(0,123,255,0.2)',
+                                    fill: true,
+                                    tension: 0.3,
+                                    pointBackgroundColor: pointColors,
+                                    pointRadius: 6
+                                }]
+                            },
+                            options: {
+                                responsive: true,
+                                plugins: {
+                                    legend: { display: true },
+                                    tooltip: {
+                                        callbacks: {
+                                            label: function (context) {
+                                                const val = context.raw;
+                                                return val === maxDebt ? `🔴 Maksimum Borç: ${val} TL` : `Borç: ${val} TL`;
+                                            }
+                                        }
+                                    }
+                                },
+                                scales: {
+                                    x: { title: { display: true, text: 'Tarih' } },
+                                    y: { title: { display: true, text: 'Borç (TL)' } }
+                                }
+                            }
+                        });
+
+                        maxDebtInfo.innerHTML = `📌 En yüksek borç: <b>${maxDebt} TL</b> <br> Tarih: <b>${data.maxDebtDate}</b>`;
+                        maxDebtInfo.classList.add("highlight");
+                    })
+                    .catch(err => console.error("Bakiye yükleme hatası:", err));
+            });
+        });
+    </script>
+</body>
+</html>
